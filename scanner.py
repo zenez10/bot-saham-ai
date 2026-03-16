@@ -107,4 +107,32 @@ def monitor():
                 s = yf.Ticker(kode)
                 h = s.history(period="1d", interval="1m")
                 if h.empty: continue
-                hrg, op = h['Close'].iloc[-
+                hrg, op = h['Close'].iloc[-1], h['Open'].iloc[0]
+                tgl = now_wib.strftime('%Y-%m-%d')
+
+                # Cek TP/SL
+                active_trades = df[(df['kode'] == kode) & (df['status'] == 'OPEN')]
+                for idx, row in active_trades.iterrows():
+                    if hrg >= row['tp']:
+                        df.at[idx, 'status'] = 'PROFIT'
+                        kirim_telegram(f"✅ *TP HIT:* {kode} @ {hrg:,.0f}")
+                        df.to_csv('history.csv', index=False)
+                    elif hrg <= row['sl']:
+                        df.at[idx, 'status'] = 'LOSS'
+                        kirim_telegram(f"❌ *SL HIT:* {kode} @ {hrg:,.0f}")
+                        df.to_csv('history.csv', index=False)
+
+                # Cek Beli
+                if df[(df['kode'] == kode) & (df['tgl_sinyal'] == tgl)].empty:
+                    if ((hrg - op) / op) * 100 > 0.5:
+                        sent = analisa_sentimen(s.news)
+                        tp, sl = hrg * 1.075, hrg * 0.975
+                        new_row = pd.DataFrame([{'kode': kode, 'tgl_sinyal': tgl, 'harga_beli': hrg, 'tp': tp, 'sl': sl, 'status': 'OPEN'}])
+                        df = pd.concat([df, new_row], ignore_index=True)
+                        df.to_csv('history.csv', index=False)
+                        kirim_telegram(f"🚀 *BUY:* {kode} @ {hrg:,.0f}\n🧠 {sent}\n🎯 TP: {tp:,.0f} | SL: {sl:,.0f}")
+            time.sleep(60)
+        except: time.sleep(30)
+
+if __name__ == "__main__":
+    monitor()
