@@ -77,15 +77,15 @@ def monitor():
     if berita_ihsg:
         msg += "📰 *BERITA TERKINI:*\n"
         for i, b in enumerate(berita_ihsg):
-            judul = b.get('title', 'Berita Saham').replace('[','').replace(']','').replace('*','')
+            judul = b.get('title', 'Berita Saham').replace('[','').replace(']','').replace('*','').replace('_','')
             link = b.get('link') or (b.get('content', {}).get('clickThroughUrl', {}).get('url'))
             if link:
-                # Format Baru: Judul di atas, link di bawah
-                msg += f"{i+1}. *{judul}*\n🔗 [Klik Berita]({link})\n\n"
+                # JUDUL BERITA SEBAGAI LINK (Tinggal klik judulnya)
+                msg += f"{i+1}. *[{judul}]({link})*\n\n"
         msg += "──────────────────\n"
 
     if not saham_pantauan:
-        msg += "🔍 *ANALISA:* Tidak ada saham bintang. Pantau Big Caps utama."
+        msg += "🔍 *ANALISA:* Tidak ada saham bintang kemarin. Pantau Big Caps utama."
         saham_pantauan = ['BBCA.JK', 'BBRI.JK', 'BMRI.JK', 'TLKM.JK']
     else:
         msg += f"🎯 *TARGET:* `{', '.join(saham_pantauan)}`"
