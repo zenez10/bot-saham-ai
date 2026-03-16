@@ -5,7 +5,7 @@ import os
 import time
 from datetime import datetime, timedelta
 
-# Ambil konfigurasi dari GitHub Secrets
+# Konfigurasi Bot
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
@@ -22,88 +22,116 @@ def kirim_telegram(pesan):
     payload = {'chat_id': CHAT_ID, 'text': pesan, 'parse_mode': 'Markdown', 'disable_web_page_preview': True}
     try:
         requests.post(url, data=payload)
-    except Exception as e:
-        print(f"Gagal kirim Telegram: {e}")
+    except:
+        print("Gagal kirim ke Telegram")
 
 def get_kondisi_ihsg():
     try:
         ihsg = yf.Ticker("^JKSE")
         h = ihsg.history(period="2d")
-        last_close = h['Close'].iloc[-1]
-        prev_close = h['Close'].iloc[-2]
-        perubahan = ((last_close - prev_close) / prev_close) * 100
+        perubahan = ((h['Close'].iloc[-1] - h['Close'].iloc[-2]) / h['Close'].iloc[-2]) * 100
         status = "🟢 BULLISH" if perubahan > 0 else "🔴 BEARISH"
         return f"{status} ({perubahan:.2f}%)", ihsg.news[:5]
     except:
         return "⚪ TIDAK TERDETEKSI", []
 
-def buat_laporan_mingguan():
+def analisa_sentimen(berita_list):
+    if not berita_list: return "⚪ NETRAL (No News)"
+    pos = ['laba', 'naik', 'untung', 'dividen', 'ekspansi', 'akuisisi', 'positif', 'rekor', 'profit']
+    neg = ['rugi', 'turun', 'anjlok', 'sengketa', 'denda', 'kasus', 'negatif', 'suspensi']
+    skor = 0
+    for n in berita_list:
+        txt = n.get('title', '').lower()
+        skor += sum(1 for p in pos if p in txt)
+        skor -= sum(1 for n_ in neg if n_ in txt)
+    return f"🟢 BULLISH (Score: {skor})" if skor > 0 else (f"🔴 BEARISH (Score: {skor})" if skor < 0 else "⚪ NETRAL")
+
+def cari_bintang_kemarin():
+    bintang = []
+    for kode in watchlist_lq45:
+        try:
+            h = yf.Ticker(kode).history(period="5d")
+            if len(h) < 3: continue
+            chg = ((h['Close'].iloc[-2] - h['Close'].iloc[-3]) / h['Close'].iloc[-3]) * 100
+            if chg > 1.5 and h['Volume'].iloc[-2] > h['Volume'].mean():
+                bintang.append(kode)
+        except: continue
+    return bintang
+
+def buat_rekap_mingguan():
     try:
         df = pd.read_csv('history.csv')
-        if df.empty: return "Belum ada transaksi minggu ini."
         tgl_batas = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
         df_week = df[df['tgl_sinyal'] >= tgl_batas]
-        profit = len(df_week[df_week['status'] == 'PROFIT'])
-        loss = len(df_week[df_week['status'] == 'LOSS'])
-        win_rate = (profit / (profit + loss) * 100) if (profit + loss) > 0 else 0
-        
-        report = "📊 *REKAPITULASI MINGGUAN*\n"
-        report += f"──────────────────\n"
-        report += f"✅ Profit: {profit} | ❌ Loss: {loss}\n"
-        report += f"📈 *Win Rate: {win_rate:.1f}%*\n"
-        report += f"──────────────────"
-        return report
-    except: return "Gagal membuat laporan mingguan."
+        p = len(df_week[df_week['status'] == 'PROFIT'])
+        l = len(df_week[df_week['status'] == 'LOSS'])
+        wr = (p / (p + l) * 100) if (p + l) > 0 else 0
+        return f"📊 *REKAP MINGGUAN*\n✅ Profit: {p} | ❌ Loss: {l}\n📈 *Win Rate: {wr:.1f}%*"
+    except: return "Belum ada data rekap."
 
 def monitor():
     wib_now = datetime.utcnow() + timedelta(hours=7)
     ihsg_info, berita_ihsg = get_kondisi_ihsg()
+    saham_pantauan = cari_bintang_kemarin()
     
-    # --- LAPORAN PEMBUKAAN ---
-    msg_laporan = f"☀️ *MARKET PREPARATION REPORT*\n"
-    msg_laporan += f"📅 Tanggal: {wib_now.strftime('%d %b %Y')}\n"
-    msg_laporan += f"──────────────────\n"
-    msg_laporan += f"📈 *KONDISI IHSG:* {ihsg_info}\n\n"
+    # 1. LAPORAN PAGI
+    msg = f"☀️ *MARKET PREPARATION REPORT*\n📅 {wib_now.strftime('%d %b %Y')}\n"
+    msg += f"──────────────────\n📈 IHSG: *{ihsg_info}*\n\n"
     
-    # Tambahkan Berita IHSG
     if berita_ihsg:
-        msg_laporan += "📰 *BERITA TERKINI IHSG:*\n"
-        for i, berita in enumerate(berita_ihsg):
-            judul = berita['title']
-            link = berita['link']
-            msg_laporan += f"{i+1}. [{judul}]({link})\n\n"
-        msg_laporan += f"──────────────────\n"
-
-    saham_pantauan = [] # Logika cari_bintang_kemarin() bisa ditaruh di sini
-    # (Singkatnya saya asumsikan fungsi cari_bintang_kemarin ada seperti versi sebelumnya)
-    # Untuk menghemat ruang, kita gunakan daftar ringkas
-    try:
-        from scanner import cari_bintang_kemarin
-        saham_pantauan = cari_bintang_kemarin()
-    except:
-        saham_pantauan = ['BBCA.JK', 'BBRI.JK', 'BMRI.JK', 'TLKM.JK', 'ASII.JK']
+        msg += "📰 *BERITA TERKINI:*\n"
+        for i, b in enumerate(berita_ihsg):
+            msg += f"{i+1}. [{b.get('title', 'News Link')}]({b.get('link', '#')})\n\n"
+        msg += "──────────────────\n"
 
     if not saham_pantauan:
-        msg_laporan += "🔍 *ANALISA SAHAM:* \nTidak ada saham bintang. 'Wait & See'."
+        msg += "🔍 *ANALISA:* Tidak ada saham bintang. Pantau Big Caps."
+        saham_pantauan = ['BBCA.JK', 'BBRI.JK', 'BMRI.JK', 'TLKM.JK']
     else:
-        msg_laporan += "🎯 *TARGET MOMENTUM HARI INI:*\n"
-        for s in saham_pantauan: msg_laporan += f"• `{s}`\n"
+        msg += f"🎯 *TARGET:* `{', '.join(saham_pantauan)}`"
     
-    msg_laporan += f"\n──────────────────\n"
-    msg_laporan += "🤖 *Status:* Monitoring Real-time Aktif..."
-    kirim_telegram(msg_laporan)
-    
-    # --- LOOPING MONITORING (Tetap seperti v4.2) ---
+    kirim_telegram(msg)
+
+    # 2. LOOPING MONITORING
     while True:
         now_wib = datetime.utcnow() + timedelta(hours=7)
         if now_wib.hour >= 16:
-            if now_wib.weekday() == 4: kirim_telegram(buat_laporan_mingguan())
-            kirim_telegram("🏁 *JAM BURSA BERAKHIR.* Sampai jumpa besok!")
+            if now_wib.weekday() == 4: kirim_telegram(buat_rekap_mingguan())
+            kirim_telegram("🏁 *JAM BURSA BERAKHIR.*")
             break
-        # ... (Logika monitoring hrg & TP/SL tetap sama dengan kode sebelumnya)
-        time.sleep(60)
+
+        try:
+            try: df = pd.read_csv('history.csv')
+            except: df = pd.DataFrame(columns=['kode', 'tgl_sinyal', 'harga_beli', 'tp', 'sl', 'status'])
+
+            for kode in saham_pantauan:
+                s = yf.Ticker(kode)
+                h = s.history(period="1d", interval="1m")
+                if h.empty: continue
+                hrg, op = h['Close'].iloc[-1], h['Open'].iloc[0]
+                tgl = now_wib.strftime('%Y-%m-%d')
+
+                # Cek TP/SL
+                for idx, row in df[(df['kode'] == kode) & (df['status'] == 'OPEN')].iterrows():
+                    if hrg >= row['tp']:
+                        df.at[idx, 'status'] = 'PROFIT'
+                        kirim_telegram(f"✅ *TP HIT:* {kode} @ {hrg:,.0f}")
+                    elif hrg <= row['sl']:
+                        df.at[idx, 'status'] = 'LOSS'
+                        kirim_telegram(f"❌ *SL HIT:* {kode} @ {hrg:,.0f}")
+                    df.to_csv('history.csv', index=False)
+
+                # Cek Sinyal Beli
+                if df[(df['kode'] == kode) & (df['tgl_sinyal'] == tgl)].empty:
+                    if ((hrg - op) / op) * 100 > 0.5:
+                        sentimen = analisa_sentimen(s.news)
+                        tp, sl = hrg * 1.075, hrg * 0.975
+                        new = {'kode': kode, 'tgl_sinyal': tgl, 'harga_beli': hrg, 'tp': tp, 'sl': sl, 'status': 'OPEN'}
+                        df = pd.concat([df, pd.DataFrame([new])], ignore_index=True)
+                        df.to_csv('history.csv', index=False)
+                        kirim_telegram(f"🚀 *BUY:* {kode} @ {hrg:,.0f}\n🧠 {sentimen}\n🎯 TP: {tp:,.0f} | SL: {sl:,.0f}")
+            time.sleep(60)
+        except: time.sleep(30)
 
 if __name__ == "__main__":
-    # Pastikan fungsi cari_bintang_kemarin() didefinisikan di sini juga 
-    # sebelum monitor() dipanggil agar tidak error.
     monitor()
