@@ -70,21 +70,26 @@ def monitor():
     ihsg_info, berita_ihsg = get_kondisi_ihsg()
     saham_pantauan = cari_bintang_kemarin()
     
-    # Laporan Pagi
+    # --- LAPORAN PEMBUKAAN ---
     msg = f"☀️ *MARKET PREPARATION REPORT*\n📅 {wib_now.strftime('%d %b %Y')}\n"
     msg += f"──────────────────\n📈 IHSG: *{ihsg_info}*\n\n"
+    
     if berita_ihsg:
         msg += "📰 *BERITA TERKINI:*\n"
         for i, b in enumerate(berita_ihsg):
-            judul = b.get('title', 'Berita').replace('[','').replace(']','')
+            judul = b.get('title', 'Berita Saham').replace('[','').replace(']','').replace('*','')
             link = b.get('link') or (b.get('content', {}).get('clickThroughUrl', {}).get('url'))
-            if link: msg += f"{i+1}. [{judul}]({link})\n\n"
+            if link:
+                # Format Baru: Judul di atas, link di bawah
+                msg += f"{i+1}. *{judul}*\n🔗 [Klik Berita]({link})\n\n"
         msg += "──────────────────\n"
 
     if not saham_pantauan:
-        msg += "🔍 *ANALISA:* Tidak ada saham bintang. Pantau Big Caps."
+        msg += "🔍 *ANALISA:* Tidak ada saham bintang. Pantau Big Caps utama."
         saham_pantauan = ['BBCA.JK', 'BBRI.JK', 'BMRI.JK', 'TLKM.JK']
-    else: msg += f"🎯 *TARGET:* `{', '.join(saham_pantauan)}`"
+    else:
+        msg += f"🎯 *TARGET:* `{', '.join(saham_pantauan)}`"
+    
     kirim_telegram(msg)
 
     while True:
@@ -95,7 +100,6 @@ def monitor():
             break
 
         try:
-            # Fix Load/Create CSV
             if os.path.exists('history.csv'): df = pd.read_csv('history.csv')
             else: df = pd.DataFrame(columns=['kode', 'tgl_sinyal', 'harga_beli', 'tp', 'sl', 'status'])
 
@@ -103,34 +107,4 @@ def monitor():
                 s = yf.Ticker(kode)
                 h = s.history(period="1d", interval="1m")
                 if h.empty: continue
-                hrg, op = h['Close'].iloc[-1], h['Open'].iloc[0]
-                tgl = now_wib.strftime('%Y-%m-%d')
-
-                # Cek TP/SL
-                active_trades = df[(df['kode'] == kode) & (df['status'] == 'OPEN')]
-                for idx, row in active_trades.iterrows():
-                    if hrg >= row['tp']:
-                        df.at[idx, 'status'] = 'PROFIT'
-                        kirim_telegram(f"✅ *TP HIT:* {kode} @ {hrg:,.0f}")
-                        df.to_csv('history.csv', index=False)
-                    elif hrg <= row['sl']:
-                        df.at[idx, 'status'] = 'LOSS'
-                        kirim_telegram(f"❌ *SL HIT:* {kode} @ {hrg:,.0f}")
-                        df.to_csv('history.csv', index=False)
-
-                # Cek Beli - Perbaikan Logika Concat
-                if df[(df['kode'] == kode) & (df['tgl_sinyal'] == tgl)].empty:
-                    if ((hrg - op) / op) * 100 > 0.5:
-                        sent = analisa_sentimen(s.news)
-                        tp, sl = hrg * 1.075, hrg * 0.975
-                        new_row = pd.DataFrame([{'kode': kode, 'tgl_sinyal': tgl, 'harga_beli': hrg, 'tp': tp, 'sl': sl, 'status': 'OPEN'}])
-                        df = pd.concat([df, new_row], ignore_index=True)
-                        df.to_csv('history.csv', index=False)
-                        kirim_telegram(f"🚀 *BUY:* {kode} @ {hrg:,.0f}\n🧠 {sent}\n🎯 TP: {tp:,.0f} | SL: {sl:,.0f}")
-            time.sleep(60)
-        except Exception as e:
-            print(f"Error: {e}")
-            time.sleep(30)
-
-if __name__ == "__main__":
-    monitor()
+                hrg, op = h['Close'].iloc[-
