@@ -5,11 +5,10 @@ import os
 import time
 from datetime import datetime, timedelta
 
-# Konfigurasi Bot dari GitHub Secrets
+# Konfigurasi Bot
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-# DAFTAR 30 SAHAM LQ45
 watchlist_lq45 = [
     'ADRO.JK', 'AMMN.JK', 'AMRT.JK', 'ASII.JK', 'BBCA.JK', 'BBNI.JK', 'BBRI.JK', 'BBTN.JK',
     'BMRI.JK', 'BRIS.JK', 'BRPT.JK', 'CPIN.JK', 'GOTO.JK', 'HRUM.JK', 'ICBP.JK',
@@ -19,16 +18,9 @@ watchlist_lq45 = [
 
 def kirim_telegram(pesan):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {
-        'chat_id': CHAT_ID, 
-        'text': pesan, 
-        'parse_mode': 'Markdown', 
-        'disable_web_page_preview': True
-    }
-    try:
-        requests.post(url, data=payload)
-    except:
-        print("Gagal kirim ke Telegram")
+    payload = {'chat_id': CHAT_ID, 'text': pesan, 'parse_mode': 'Markdown', 'disable_web_page_preview': True}
+    try: requests.post(url, data=payload)
+    except: print("Gagal kirim Telegram")
 
 def get_kondisi_ihsg():
     try:
@@ -37,11 +29,10 @@ def get_kondisi_ihsg():
         perubahan = ((h['Close'].iloc[-1] - h['Close'].iloc[-2]) / h['Close'].iloc[-2]) * 100
         status = "🟢 BULLISH" if perubahan > 0 else "🔴 BEARISH"
         return f"{status} ({perubahan:.2f}%)", ihsg.news[:5]
-    except:
-        return "⚪ TIDAK TERDETEKSI", []
+    except: return "⚪ TIDAK TERDETEKSI", []
 
 def analisa_sentimen(berita_list):
-    if not berita_list: return "⚪ NETRAL (No News)"
+    if not berita_list: return "⚪ NETRAL"
     pos = ['laba', 'naik', 'untung', 'dividen', 'ekspansi', 'akuisisi', 'positif', 'rekor', 'profit']
     neg = ['rugi', 'turun', 'anjlok', 'sengketa', 'denda', 'kasus', 'negatif', 'suspensi']
     skor = 0
@@ -72,44 +63,74 @@ def buat_rekap_mingguan():
         l = len(df_week[df_week['status'] == 'LOSS'])
         wr = (p / (p + l) * 100) if (p + l) > 0 else 0
         return f"📊 *REKAP MINGGUAN*\n✅ Profit: {p} | ❌ Loss: {l}\n📈 *Win Rate: {wr:.1f}%*"
-    except: return "Belum ada data rekap transaksi."
+    except: return "Belum ada data rekap."
 
 def monitor():
     wib_now = datetime.utcnow() + timedelta(hours=7)
     ihsg_info, berita_ihsg = get_kondisi_ihsg()
     saham_pantauan = cari_bintang_kemarin()
     
-    # 1. LAPORAN PAGI
+    # Laporan Pagi
     msg = f"☀️ *MARKET PREPARATION REPORT*\n📅 {wib_now.strftime('%d %b %Y')}\n"
     msg += f"──────────────────\n📈 IHSG: *{ihsg_info}*\n\n"
-    
     if berita_ihsg:
         msg += "📰 *BERITA TERKINI:*\n"
         for i, b in enumerate(berita_ihsg):
-            judul = b.get('title', 'Berita Saham')
-            # Cek link di berbagai kemungkinan lokasi data
-            link = b.get('link')
-            if not link and 'content' in b:
-                link = b['content'].get('clickThroughUrl', {}).get('url')
-            
-            if judul and link:
-                # Bersihkan karakter khusus agar Markdown Telegram tidak error
-                judul_clean = judul.replace('[','').replace(']','').replace('*','').replace('_','')
-                msg += f"{i+1}. [{judul_clean}]({link})\n\n"
-            elif judul:
-                msg += f"{i+1}. {judul}\n\n"
+            judul = b.get('title', 'Berita').replace('[','').replace(']','')
+            link = b.get('link') or (b.get('content', {}).get('clickThroughUrl', {}).get('url'))
+            if link: msg += f"{i+1}. [{judul}]({link})\n\n"
         msg += "──────────────────\n"
 
     if not saham_pantauan:
-        msg += "🔍 *ANALISA:* Tidak ada saham bintang kemarin. Pantau Big Caps utama."
+        msg += "🔍 *ANALISA:* Tidak ada saham bintang. Pantau Big Caps."
         saham_pantauan = ['BBCA.JK', 'BBRI.JK', 'BMRI.JK', 'TLKM.JK']
-    else:
-        msg += f"🎯 *TARGET:* `{', '.join(saham_pantauan)}`"
-    
+    else: msg += f"🎯 *TARGET:* `{', '.join(saham_pantauan)}`"
     kirim_telegram(msg)
 
-    # 2. LOOPING MONITORING REAL-TIME
     while True:
         now_wib = datetime.utcnow() + timedelta(hours=7)
-        # Berhenti jam 16:00 WIB
-        if now_wib
+        if now_wib.hour >= 16:
+            if now_wib.weekday() == 4: kirim_telegram(buat_rekap_mingguan())
+            kirim_telegram("🏁 *JAM BURSA BERAKHIR.*")
+            break
+
+        try:
+            # Fix Load/Create CSV
+            if os.path.exists('history.csv'): df = pd.read_csv('history.csv')
+            else: df = pd.DataFrame(columns=['kode', 'tgl_sinyal', 'harga_beli', 'tp', 'sl', 'status'])
+
+            for kode in saham_pantauan:
+                s = yf.Ticker(kode)
+                h = s.history(period="1d", interval="1m")
+                if h.empty: continue
+                hrg, op = h['Close'].iloc[-1], h['Open'].iloc[0]
+                tgl = now_wib.strftime('%Y-%m-%d')
+
+                # Cek TP/SL
+                active_trades = df[(df['kode'] == kode) & (df['status'] == 'OPEN')]
+                for idx, row in active_trades.iterrows():
+                    if hrg >= row['tp']:
+                        df.at[idx, 'status'] = 'PROFIT'
+                        kirim_telegram(f"✅ *TP HIT:* {kode} @ {hrg:,.0f}")
+                        df.to_csv('history.csv', index=False)
+                    elif hrg <= row['sl']:
+                        df.at[idx, 'status'] = 'LOSS'
+                        kirim_telegram(f"❌ *SL HIT:* {kode} @ {hrg:,.0f}")
+                        df.to_csv('history.csv', index=False)
+
+                # Cek Beli - Perbaikan Logika Concat
+                if df[(df['kode'] == kode) & (df['tgl_sinyal'] == tgl)].empty:
+                    if ((hrg - op) / op) * 100 > 0.5:
+                        sent = analisa_sentimen(s.news)
+                        tp, sl = hrg * 1.075, hrg * 0.975
+                        new_row = pd.DataFrame([{'kode': kode, 'tgl_sinyal': tgl, 'harga_beli': hrg, 'tp': tp, 'sl': sl, 'status': 'OPEN'}])
+                        df = pd.concat([df, new_row], ignore_index=True)
+                        df.to_csv('history.csv', index=False)
+                        kirim_telegram(f"🚀 *BUY:* {kode} @ {hrg:,.0f}\n🧠 {sent}\n🎯 TP: {tp:,.0f} | SL: {sl:,.0f}")
+            time.sleep(60)
+        except Exception as e:
+            print(f"Error: {e}")
+            time.sleep(30)
+
+if __name__ == "__main__":
+    monitor()
