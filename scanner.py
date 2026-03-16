@@ -5,7 +5,7 @@ import os
 import time
 from datetime import datetime, timedelta
 
-# Konfigurasi Bot
+# Konfigurasi Bot dari GitHub Secrets
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
@@ -19,7 +19,12 @@ watchlist_lq45 = [
 
 def kirim_telegram(pesan):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    payload = {'chat_id': CHAT_ID, 'text': pesan, 'parse_mode': 'Markdown', 'disable_web_page_preview': True}
+    payload = {
+        'chat_id': CHAT_ID, 
+        'text': pesan, 
+        'parse_mode': 'Markdown', 
+        'disable_web_page_preview': True
+    }
     try:
         requests.post(url, data=payload)
     except:
@@ -67,7 +72,7 @@ def buat_rekap_mingguan():
         l = len(df_week[df_week['status'] == 'LOSS'])
         wr = (p / (p + l) * 100) if (p + l) > 0 else 0
         return f"📊 *REKAP MINGGUAN*\n✅ Profit: {p} | ❌ Loss: {l}\n📈 *Win Rate: {wr:.1f}%*"
-    except: return "Belum ada data rekap."
+    except: return "Belum ada data rekap transaksi."
 
 def monitor():
     wib_now = datetime.utcnow() + timedelta(hours=7)
@@ -81,57 +86,30 @@ def monitor():
     if berita_ihsg:
         msg += "📰 *BERITA TERKINI:*\n"
         for i, b in enumerate(berita_ihsg):
-            msg += f"{i+1}. [{b.get('title', 'News Link')}]({b.get('link', '#')})\n\n"
+            judul = b.get('title', 'Berita Saham')
+            # Cek link di berbagai kemungkinan lokasi data
+            link = b.get('link')
+            if not link and 'content' in b:
+                link = b['content'].get('clickThroughUrl', {}).get('url')
+            
+            if judul and link:
+                # Bersihkan karakter khusus agar Markdown Telegram tidak error
+                judul_clean = judul.replace('[','').replace(']','').replace('*','').replace('_','')
+                msg += f"{i+1}. [{judul_clean}]({link})\n\n"
+            elif judul:
+                msg += f"{i+1}. {judul}\n\n"
         msg += "──────────────────\n"
 
     if not saham_pantauan:
-        msg += "🔍 *ANALISA:* Tidak ada saham bintang. Pantau Big Caps."
+        msg += "🔍 *ANALISA:* Tidak ada saham bintang kemarin. Pantau Big Caps utama."
         saham_pantauan = ['BBCA.JK', 'BBRI.JK', 'BMRI.JK', 'TLKM.JK']
     else:
         msg += f"🎯 *TARGET:* `{', '.join(saham_pantauan)}`"
     
     kirim_telegram(msg)
 
-    # 2. LOOPING MONITORING
+    # 2. LOOPING MONITORING REAL-TIME
     while True:
         now_wib = datetime.utcnow() + timedelta(hours=7)
-        if now_wib.hour >= 16:
-            if now_wib.weekday() == 4: kirim_telegram(buat_rekap_mingguan())
-            kirim_telegram("🏁 *JAM BURSA BERAKHIR.*")
-            break
-
-        try:
-            try: df = pd.read_csv('history.csv')
-            except: df = pd.DataFrame(columns=['kode', 'tgl_sinyal', 'harga_beli', 'tp', 'sl', 'status'])
-
-            for kode in saham_pantauan:
-                s = yf.Ticker(kode)
-                h = s.history(period="1d", interval="1m")
-                if h.empty: continue
-                hrg, op = h['Close'].iloc[-1], h['Open'].iloc[0]
-                tgl = now_wib.strftime('%Y-%m-%d')
-
-                # Cek TP/SL
-                for idx, row in df[(df['kode'] == kode) & (df['status'] == 'OPEN')].iterrows():
-                    if hrg >= row['tp']:
-                        df.at[idx, 'status'] = 'PROFIT'
-                        kirim_telegram(f"✅ *TP HIT:* {kode} @ {hrg:,.0f}")
-                    elif hrg <= row['sl']:
-                        df.at[idx, 'status'] = 'LOSS'
-                        kirim_telegram(f"❌ *SL HIT:* {kode} @ {hrg:,.0f}")
-                    df.to_csv('history.csv', index=False)
-
-                # Cek Sinyal Beli
-                if df[(df['kode'] == kode) & (df['tgl_sinyal'] == tgl)].empty:
-                    if ((hrg - op) / op) * 100 > 0.5:
-                        sentimen = analisa_sentimen(s.news)
-                        tp, sl = hrg * 1.075, hrg * 0.975
-                        new = {'kode': kode, 'tgl_sinyal': tgl, 'harga_beli': hrg, 'tp': tp, 'sl': sl, 'status': 'OPEN'}
-                        df = pd.concat([df, pd.DataFrame([new])], ignore_index=True)
-                        df.to_csv('history.csv', index=False)
-                        kirim_telegram(f"🚀 *BUY:* {kode} @ {hrg:,.0f}\n🧠 {sentimen}\n🎯 TP: {tp:,.0f} | SL: {sl:,.0f}")
-            time.sleep(60)
-        except: time.sleep(30)
-
-if __name__ == "__main__":
-    monitor()
+        # Berhenti jam 16:00 WIB
+        if now_wib
