@@ -3,11 +3,11 @@ import pandas as pd
 import requests
 import os
 
-# Mengambil data rahasia dari sistem
+# Ambil data rahasia dari GitHub Secrets
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 
-# Daftar 20 Saham Pilihan (Bisa Anda tambah/kurangi sendiri nanti)
+# Daftar 20 Saham Pilihan
 daftar_saham = [
     'BBCA.JK', 'BBRI.JK', 'BMRI.JK', 'TLKM.JK', 'ASII.JK', 'GOTO.JK', 
     'BBNI.JK', 'UNTR.JK', 'ADRO.JK', 'ANTM.JK', 'PGAS.JK', 'MDKA.JK', 
@@ -18,10 +18,17 @@ daftar_saham = [
 def kirim_telegram(pesan):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
     payload = {'chat_id': CHAT_ID, 'text': pesan, 'parse_mode': 'Markdown'}
-    requests.post(url, data=payload)
+    try:
+        requests.post(url, data=payload)
+    except Exception as e:
+        print(f"Gagal kirim Telegram: {e}")
 
 def scan():
-    sinyal_ditemukan = False
+    total_scan = len(daftar_saham)
+    saham_lolos = 0
+    
+    print(f"Memulai pemindaian {total_scan} saham...")
+
     for kode in daftar_saham:
         try:
             s = yf.Ticker(kode)
@@ -33,30 +40,43 @@ def scan():
             vol_rata = h['Volume'].mean()
             perubahan = ((harga_skrg - h['Close'].iloc[-2]) / h['Close'].iloc[-2]) * 100
 
-            # FILTER: Harga naik > 0.5% DAN Volume di atas rata-rata (Uang Besar Masuk)
+            # FILTER UTAMA: Harga Naik & Volume di atas rata-rata
             if perubahan > 0.5 and vol_skrg > vol_rata:
-                sinyal_ditemukan = True
+                saham_lolos += 1
                 sl = harga_skrg * 0.975 # Stop Loss 2.5%
-                tp = harga_skrg * 1.075 # Take Profit 7.5% (Ratio 1:3)
+                tp = harga_skrg * 1.075 # Take Profit 7.5%
 
                 txt = f"🚀 *SINYAL: {kode}*\n"
                 txt += f"💰 Harga: Rp {harga_skrg:,.0f} ({perubahan:.2f}%)\n"
                 txt += f"🎯 *Target Profit: Rp {tp:,.0f}*\n"
-                txt += f"🛡️ *Stop Loss: Rp {sl:,.0f}*\n\n"
+                txt += f"🛡️ *Stop Loss: Rp {sl:,.0f}*\n"
+                txt += f"📊 Vol: {vol_skrg/vol_rata:.1f}x rata-rata\n\n"
                 
-                # Menambah Berita Seminggu Terakhir
-                berita = s.news
-                if berita:
-                    txt += "📰 *Berita Terkait (Konteks):*\n"
-                    for n in berita[:2]: # Ambil 2 berita teratas
-                        txt += f"• {n['title']}\n"
+                # Bagian Berita
+                try:
+                    berita = s.news
+                    if berita and len(berita) > 0:
+                        txt += "📰 *Berita Terkait:*\n"
+                        for n in berita[:2]:
+                            txt += f"• {n['title']}\n"
+                    else:
+                        txt += "📰 *Berita:* Tidak ada berita signifikan minggu ini.\n"
+                except:
+                    txt += "📰 *Berita:* Gagal memuat berita.\n"
                 
                 txt += "\n----------------------------"
                 kirim_telegram(txt)
-        except: continue
+        except:
+            continue
 
-    if not sinyal_ditemukan:
-        kirim_telegram("😴 Belum ada saham yang memenuhi kriteria 'Sangat Layak' hari ini.")
+    # LAPORAN STATUS AKHIR
+    summary = f"📊 *LAPORAN STATUS SCANNER*\n"
+    summary += f"✅ Selesai memeriksa {total_scan} saham.\n"
+    summary += f"📈 Sinyal ditemukan: {saham_lolos}\n"
+    if saham_lolos == 0:
+        summary += "\n😴 Pasar cenderung sepi, tidak ada saham yang masuk kriteria 'Sangat Layak' hari ini."
+    
+    kirim_telegram(summary)
 
 if __name__ == "__main__":
     scan()
