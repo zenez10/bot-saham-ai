@@ -73,30 +73,46 @@ def monitor():
     # --- LAPORAN PEMBUKAAN ---
     msg = f"☀️ *MARKET PREPARATION REPORT*\n📅 {wib_now.strftime('%d %b %Y')}\n"
     msg += f"──────────────────\n📈 IHSG: *{ihsg_info}*\n\n"
-    
     if berita_ihsg:
         msg += "📰 *BERITA TERKINI:*\n"
         for i, b in enumerate(berita_ihsg):
             judul = b.get('title', 'Berita Saham').replace('[','').replace(']','').replace('*','').replace('_','')
             link = b.get('link') or (b.get('content', {}).get('clickThroughUrl', {}).get('url'))
-            if link:
-                # JUDUL BERITA SEBAGAI LINK (Tinggal klik judulnya)
-                msg += f"{i+1}. *[{judul}]({link})*\n\n"
+            if link: msg += f"{i+1}. *[{judul}]({link})*\n\n"
         msg += "──────────────────\n"
 
     if not saham_pantauan:
         msg += "🔍 *ANALISA:* Tidak ada saham bintang kemarin. Pantau Big Caps utama."
         saham_pantauan = ['BBCA.JK', 'BBRI.JK', 'BMRI.JK', 'TLKM.JK']
-    else:
-        msg += f"🎯 *TARGET:* `{', '.join(saham_pantauan)}`"
-    
+    else: msg += f"🎯 *TARGET:* `{', '.join(saham_pantauan)}`"
     kirim_telegram(msg)
 
     while True:
         now_wib = datetime.utcnow() + timedelta(hours=7)
+        
+        # --- LOGIKA PENUTUPAN BURSA (16:00 WIB) ---
         if now_wib.hour >= 16:
-            if now_wib.weekday() == 4: kirim_telegram(buat_rekap_mingguan())
-            kirim_telegram("🏁 *JAM BURSA BERAKHIR.*")
+            msg_closing = "🏁 *JAM BURSA BERAKHIR*\n──────────────────\n"
+            
+            # Cek Sinyal Floating (Belum TP/SL)
+            if os.path.exists('history.csv'):
+                df_close = pd.read_csv('history.csv')
+                floating = df_close[df_close['status'] == 'OPEN']
+                
+                if not floating.empty:
+                    msg_closing += "⏳ *POSISI MASIH FLOATING:*\n"
+                    for _, row in floating.iterrows():
+                        msg_closing += f"• `{row['kode']}` (Beli: {row['harga_beli']:,.0f})\n"
+                    msg_closing += "\n💡 *Saran:* Pantau besok pagi."
+                else:
+                    msg_closing += "✅ Semua posisi sudah ter-close (Clean)."
+            
+            kirim_telegram(msg_closing)
+            
+            # Jika hari Jumat, kirim rekap mingguan
+            if now_wib.weekday() == 4:
+                kirim_telegram(buat_rekap_mingguan())
+                
             break
 
         try:
