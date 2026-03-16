@@ -100,4 +100,48 @@ def monitor():
         try:
             # Load History
             try: df = pd.read_csv('history.csv')
-            except: df = pd.DataFrame(columns=['kode', 't
+            except: df = pd.DataFrame(columns=['kode', 'tgl_sinyal', 'harga_beli', 'tp', 'sl', 'status'])
+
+            for kode in saham_pantauan:
+                ticker = yf.Ticker(kode)
+                h = ticker.history(period="1d", interval="1m")
+                if h.empty: continue
+                
+                hrg = h['Close'].iloc[-1]
+                op = h['Open'].iloc[0]
+                tgl = datetime.now().strftime('%Y-%m-%d')
+
+                # 1. CEK TP/SL (Untuk Sinyal Aktif)
+                for idx, row in df[(df['kode'] == kode) & (df['status'] == 'OPEN')].iterrows():
+                    if hrg >= row['tp']:
+                        df.at[idx, 'status'] = 'PROFIT'
+                        kirim_telegram(f"✅ *TAKE PROFIT HIT!* \n💰 {kode} @ {hrg:,.0f}")
+                        df.to_csv('history.csv', index=False)
+                    elif hrg <= row['sl']:
+                        df.at[idx, 'status'] = 'LOSS'
+                        kirim_telegram(f"❌ *STOP LOSS HIT!* \n🛡️ {kode} @ {hrg:,.0f}")
+                        df.to_csv('history.csv', index=False)
+
+                # 2. CARI KONFIRMASI BELI (Jika belum ada sinyal hari ini)
+                if df[(df['kode'] == kode) & (df['tgl_sinyal'] == tgl)].empty:
+                    # Konfirmasi: Naik > 0.5% dari harga Open hari ini
+                    if ((hrg - op) / op) * 100 > 0.5:
+                        sentimen = analisa_sentimen(ticker.news)
+                        tp, sl = hrg * 1.075, hrg * 0.975
+                        new_row = {'kode': kode, 'tgl_sinyal': tgl, 'harga_beli': hrg, 'tp': tp, 'sl': sl, 'status': 'OPEN'}
+                        df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
+                        df.to_csv('history.csv', index=False)
+                        
+                        msg_buy = f"🚀 *SINYAL BELI: {kode}*\n"
+                        msg_buy += f"💰 Harga: {hrg:,.0f}\n"
+                        msg_buy += f"🧠 Sentimen: {sentimen}\n"
+                        msg_buy += f"🎯 TP: {tp:,.0f} | 🛡️ SL: {sl:,.0f}"
+                        kirim_telegram(msg_buy)
+
+            time.sleep(60) # Cek tiap menit
+        except Exception as e:
+            print(f"Loop Error: {e}")
+            time.sleep(30)
+
+if __name__ == "__main__":
+    monitor()
